@@ -71,6 +71,15 @@ section{display:none}section.on{display:block}
  <div class="card" id="plist"></div>
 </section>
 
+<section id="t-settings">
+ <div class="card" style="border-color:#b3402a">
+  <b class="neg">รีเซ็ตข้อมูล (ลบแล้วกู้คืนไม่ได้)</b>
+  <p class="mut">ใช้ตอนทดสอบระบบ ก่อนเริ่มใช้งานจริง ควรล็อกปุ่มนี้ด้วย SQL (ดูท้ายไฟล์ 02_reset.sql)</p>
+  <button class="alt" style="width:100%;margin-top:6px" onclick="resetData('transactions')">ลบมัดและประวัติเงินทั้งหมด (เก็บคนงานกับแปลง)</button>
+  <button style="width:100%;margin-top:8px;background:#b3402a" onclick="resetData('all')">ลบทุกอย่าง (รวมคนงานและแปลง)</button>
+ </div>
+</section>
+
 <div id="toast"></div>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -98,7 +107,15 @@ async function login(){
   return true;
 }
 
-const TABS=[['tally','จดมัด'],['cash','เบิกเงิน'],['workers','คนงาน'],['plots','แปลง']];
+Object.assign(ERR,{reset_disabled:'ปุ่มรีเซ็ตถูกล็อกไว้แล้ว',confirm_required:'ต้องพิมพ์ RESET ให้ถูกต้อง'});
+async function resetData(scope){
+  const what=scope==='all'?'ข้อมูลทั้งหมด รวมคนงานและแปลง':'มัดและประวัติเงินทั้งหมด';
+  if(!confirm('จะลบ'+what+'\nลบแล้วกู้คืนไม่ได้ ต้องการทำต่อ?'))return;
+  const t=prompt('พิมพ์ RESET (ตัวพิมพ์ใหญ่) เพื่อยืนยัน');if(t!=='RESET')return toast('ยกเลิกการรีเซ็ต',1);
+  const r=await rpc('reset_data',{p_scope:scope,p_confirm:t});
+  toast(`ลบแล้ว: ประวัติเงิน ${r.ledger} มัด ${r.logs} คนงาน ${r.workers} แปลง ${r.plots}`);load();
+}
+const TABS=[['tally','จดมัด'],['cash','เบิกเงิน'],['workers','คนงาน'],['plots','แปลง'],['settings','ตั้งค่า']];
 function tab(k){TABS.forEach(([id])=>{$('t-'+id).classList.toggle('on',id===k)});[...$('nav').children].forEach((b,i)=>b.classList.toggle('on',TABS[i][0]===k))}
 $('nav').innerHTML=TABS.map(([k,n])=>`<button onclick="tab('${k}')">${n}</button>`).join('');
 

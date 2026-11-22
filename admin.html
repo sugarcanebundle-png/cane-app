@@ -76,6 +76,7 @@ section{display:none}section.on{display:block}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 const CONFIG={LIFF_ID:'',SUPABASE_URL:'',SUPABASE_ANON_KEY:'',AUTH_FUNCTION:''};
+if(!CONFIG.SUPABASE_URL||!CONFIG.SUPABASE_ANON_KEY||!CONFIG.LIFF_ID){document.body.insertAdjacentHTML('afterbegin','<div class="card" style="color:#b3402a"><b>ยังไม่ได้กรอก CONFIG</b><br>แก้ต้นสคริปต์ของไฟล์นี้: LIFF_ID, SUPABASE_URL, SUPABASE_ANON_KEY, AUTH_FUNCTION</div>');throw new Error('CONFIG empty')}
 const sb=supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON_KEY);
 const $=id=>document.getElementById(id);
 const fmt=n=>Number(n||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});

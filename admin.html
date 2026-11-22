@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>จดมัดอ้อย - หลังบ้าน</title>
+<style>
+:root{--bg:#f3efe1;--ink:#1f2a1c;--cane:#2f5d3a;--soft:#e4ddc4;--debt:#b3402a;--card:#fffdf6;--mut:#6b705f}
+@media(prefers-color-scheme:dark){:root{--bg:#171c15;--ink:#ece8d6;--cane:#7fbf8c;--soft:#2a3226;--debt:#ff8a73;--card:#1f261c;--mut:#a3a891}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Noto Sans Thai","Sarabun",system-ui,sans-serif;padding:12px 12px 80px;max-width:640px;margin:auto}
+nav{display:flex;gap:6px;overflow-x:auto;position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:2}
+nav button{flex:0 0 auto;background:var(--soft);color:var(--ink)}
+nav button.on{background:var(--cane);color:#fff}
+.card{background:var(--card);border:1px solid var(--soft);border-radius:12px;padding:14px;margin:10px 0}
+label{display:block;margin:8px 0 2px;font-size:.9rem;color:var(--mut)}
+input,select{width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid var(--soft);background:var(--bg);color:var(--ink)}
+button{font:inherit;padding:10px 14px;border-radius:10px;border:0;background:var(--cane);color:#fff}
+button.sm{padding:6px 10px;font-size:.85rem}
+button.alt{background:var(--soft);color:var(--ink)}
+.quick{display:flex;gap:6px;margin:8px 0}.quick button{flex:1;background:var(--soft);color:var(--ink);font-weight:700}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--soft)}
+.row:last-child{border:0}
+.mut{color:var(--mut);font-size:.85rem}.pos{color:var(--cane)}.neg{color:var(--debt)}
+.acts{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+#toast{position:fixed;left:12px;right:12px;bottom:16px;background:var(--ink);color:var(--bg);padding:12px;border-radius:10px;display:none;text-align:center}
+section{display:none}section.on{display:block}
+</style>
+</head>
+<body>
+<nav id="nav"></nav>
+
+<section id="t-tally">
+ <div class="card">
+  <label>คนงาน</label><select id="wk1"></select>
+  <button class="alt" style="width:100%;margin-top:6px" onclick="scan('wk1')">สแกน QR คนงาน</button>
+  <label>แปลง</label><select id="plot1"></select>
+  <label>วันที่</label><input type="date" id="date1">
+  <label>จำนวนมัด</label><input type="number" id="qty1" inputmode="numeric" min="1" placeholder="0">
+  <div class="quick"><button data-q="1">+1</button><button data-q="5">+5</button><button data-q="10">+10</button><button data-q="50">+50</button></div>
+  <button id="save1" style="width:100%">บันทึกมัด</button>
+ </div>
+ <div class="card"><b>รายการล่าสุด</b><div id="recent"></div></div>
+</section>
+
+<section id="t-cash">
+ <div class="card">
+  <label>คนงาน</label><select id="wk2"></select>
+  <button class="alt" style="width:100%;margin-top:6px" onclick="scan('wk2')">สแกน QR คนงาน</button>
+  <div id="bal2" class="mut" style="margin-top:6px"></div>
+  <label>จำนวนเงิน (บาท) ไม่จำกัดเพดาน</label><input type="number" id="amt2" inputmode="decimal" min="1">
+  <label>หมายเหตุ</label><input id="note2" placeholder="เช่น เบิกล่วงหน้า / ค่าอาหาร">
+  <button id="save2" style="width:100%;margin-top:12px">บันทึกเบิกเงิน</button>
+ </div>
+ <div class="card"><b>คนที่ติดลบ (เบิกเกินค่ามัด)</b><div id="debts"></div></div>
+</section>
+
+<section id="t-workers">
+ <div class="card"><b>เพิ่มคนงาน</b>
+  <label>ชื่อ</label><input id="wname"><label>เบอร์โทร</label><input id="wphone" inputmode="tel">
+  <button id="addw" style="width:100%;margin-top:12px">เพิ่มคนงาน</button></div>
+ <div class="card" id="wlist"></div>
+</section>
+
+<section id="t-plots">
+ <div class="card"><b id="ptitle">เพิ่มแปลง</b>
+  <input type="hidden" id="pid">
+  <label>ชื่อแปลง</label><input id="pname"><label>ชนิดอ้อย</label><input id="ptype" placeholder="อ้อยสด / อ้อยไฟไหม้">
+  <label>เรท บาทต่อมัด</label><input type="number" id="prate" inputmode="decimal" step="0.01">
+  <button id="savep" style="width:100%;margin-top:12px">บันทึกแปลง</button></div>
+ <div class="card" id="plist"></div>
+</section>
+
+<div id="toast"></div>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+const CONFIG={LIFF_ID:'',SUPABASE_URL:'',SUPABASE_ANON_KEY:'',AUTH_FUNCTION:''};
+const sb=supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON_KEY);
+const $=id=>document.getElementById(id);
+const fmt=n=>Number(n||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ERR={forbidden:'ไม่มีสิทธิ์แอดมิน',reason_required:'ต้องใส่เหตุผล',amount_must_be_positive:'จำนวนเงินต้องมากกว่า 0',qty_must_be_positive:'จำนวนมัดต้องมากกว่า 0',nothing_to_pay:'ไม่มียอดคงเหลือให้จ่าย',already_voided:'ยกเลิกไปแล้ว'};
+let W=[],P=[],tt;
+function toast(m,bad){const t=$('toast');t.textContent=m;t.style.background=bad?'#b3402a':'';t.style.color=bad?'#fff':'';t.style.display='block';clearTimeout(tt);tt=setTimeout(()=>t.style.display='none',2600)}
+async function rpc(fn,args){const {data,error}=await sb.rpc(fn,args);if(error){const k=Object.keys(ERR).find(k=>error.message.includes(k));toast(k?ERR[k]:error.message,1);throw error}return data}
+
+async function login(){
+  await liff.init({liffId:CONFIG.LIFF_ID});
+  if(!liff.isLoggedIn()){liff.login();return false}
+  const t=liff.getIDToken();
+  const r=await fetch(`${CONFIG.SUPABASE_URL}/functions/v1/${CONFIG.AUTH_FUNCTION}`,{method:'POST',
+    headers:{'Content-Type':'application/json',apikey:CONFIG.SUPABASE_ANON_KEY},body:JSON.stringify({idToken:t,id_token:t})});
+  const d=await r.json();const s=d.session||d;
+  if(!s.access_token)throw new Error(d.error||'เข้าสู่ระบบไม่สำเร็จ');
+  await sb.auth.setSession({access_token:s.access_token,refresh_token:s.refresh_token});
+  return true;
+}
+
+const TABS=[['tally','จดมัด'],['cash','เบิกเงิน'],['workers','คนงาน'],['plots','แปลง']];
+function tab(k){TABS.forEach(([id])=>{$('t-'+id).classList.toggle('on',id===k)});[...$('nav').children].forEach((b,i)=>b.classList.toggle('on',TABS[i][0]===k))}
+$('nav').innerHTML=TABS.map(([k,n])=>`<button onclick="tab('${k}')">${n}</button>`).join('');
+
+async function load(){
+  const [w,p]=await Promise.all([sb.from('worker_balances').select('*').eq('active',true).order('worker_code'),sb.from('plots').select('*').eq('active',true).order('name')]);
+  if(w.error)throw w.error;W=w.data||[];P=p.data||[];
+  const wo=W.map(x=>`<option value="${x.worker_id}">${esc(x.worker_code)} ${esc(x.name)}</option>`).join('');
+  const sel=(id,h)=>{const v=$(id).value;$(id).innerHTML=h;if(v)$(id).value=v};
+  sel('wk1',wo);sel('wk2',wo);
+  sel('plot1',P.map(x=>`<option value="${x.id}">${esc(x.name)} · ฿${fmt(x.rate)}/มัด</option>`).join(''));
+  showBal();
+  $('debts').innerHTML=W.filter(x=>x.balance<0).sort((a,b)=>a.balance-b.balance).map(x=>`<div class="row"><span>${esc(x.name)}</span><b class="neg">฿${fmt(-x.balance)}</b></div>`).join('')||'<p class="mut">ไม่มีคนติดลบ</p>';
+  $('wlist').innerHTML=W.map(x=>`<div class="row"><span>${esc(x.worker_code)} ${esc(x.name)}<br><span class="mut">${x.user_id?'ผูก LINE แล้ว':'ยังไม่ผูก LINE'} · ค่ามัด ฿${fmt(x.total_earned)} · เบิก ฿${fmt(x.total_withdrawn)}</span></span>
+    <span class="acts"><b class="${x.balance<0?'neg':'pos'}">฿${fmt(x.balance)}</b>
+    <button class="sm alt" onclick="linkW('${x.worker_id}')">ผูก</button><button class="sm alt" onclick="adjW('${x.worker_id}')">ปรับ</button><button class="sm" onclick="settleW('${x.worker_id}')">จ่าย</button></span></div>`).join('')||'<p class="mut">ยังไม่มีคนงาน</p>';
+  $('plist').innerHTML=P.map(x=>`<div class="row" onclick="editP('${x.id}')"><span>${esc(x.name)}<br><span class="mut">${esc(x.cane_type||'')}</span></span><b>฿${fmt(x.rate)}/มัด</b></div>`).join('')||'<p class="mut">ยังไม่มีแปลง</p>';
+  const {data:logs}=await sb.from('bundle_logs').select('*,workers(name),plots(name)').order('created_at',{ascending:false}).limit(20);
+  $('recent').innerHTML=(logs||[]).map(l=>`<div class="row"><span>${esc(l.workers?.name)} · ${esc(l.plots?.name)}<br><span class="mut">${l.work_date} · ${l.qty} มัด${l.voided?' · ยกเลิก':''}</span></span>
+    <span class="acts"><b style="${l.voided?'text-decoration:line-through':''}">฿${fmt(l.amount)}</b>${l.voided?'':`<button class="sm alt" onclick="voidL('${l.id}')">ยกเลิก</button>`}</span></div>`).join('')||'<p class="mut">ยังไม่มีรายการ</p>';
+}
+function showBal(){const w=W.find(x=>x.worker_id===$('wk2').value);$('bal2').innerHTML=w?`คงเหลือ <b class="${w.balance<0?'neg':'pos'}">฿${fmt(w.balance)}</b>${w.balance<0?' (ค้างหนี้อยู่)':''}`:''}
+$('wk2').onchange=showBal;
+async function scan(selId){
+  try{
+    if(!liff.isApiAvailable('scanCodeV2'))return toast('สแกนได้เฉพาะในแอป LINE (ต้องเปิด Scan QR ใน LIFF)',1);
+    const r=await liff.scanCodeV2();const m=/^CW:(CW\d+)$/.exec((r.value||'').trim());
+    if(!m)return toast('ไม่ใช่ QR คนงานของระบบ',1);
+    const w=W.find(x=>x.worker_code===m[1]);if(!w)return toast('ไม่พบคนงาน '+m[1],1);
+    $(selId).value=w.worker_id;showBal();toast('เลือก '+w.name);
+  }catch(e){toast('สแกนไม่ได้: '+(e.message||e),1)}
+}
+
+document.querySelectorAll('.quick button').forEach(b=>b.onclick=()=>{$('qty1').value=(+$('qty1').value||0)+(+b.dataset.q)});
+$('save1').onclick=async()=>{
+  const q=+$('qty1').value;if(!$('wk1').value||!$('plot1').value||q<=0)return toast('เลือกคนงาน แปลง และใส่จำนวนมัด',1);
+  await rpc('record_bundles',{p_worker:$('wk1').value,p_plot:$('plot1').value,p_qty:q,p_date:$('date1').value||null});
+  $('qty1').value='';toast('บันทึกแล้ว '+q+' มัด');load()};
+$('save2').onclick=async()=>{
+  const a=+$('amt2').value;if(!$('wk2').value||a<=0)return toast('เลือกคนงานและใส่จำนวนเงิน',1);
+  await rpc('withdraw_cash',{p_worker:$('wk2').value,p_amount:a,p_note:$('note2').value||null});
+  $('amt2').value='';$('note2').value='';toast('เบิกเงิน ฿'+fmt(a)+' แล้ว');load()};
+$('addw').onclick=async()=>{await rpc('add_worker',{p_name:$('wname').value,p_phone:$('wphone').value||null});$('wname').value='';$('wphone').value='';toast('เพิ่มคนงานแล้ว');load()};
+$('savep').onclick=async()=>{await rpc('upsert_plot',{p_id:$('pid').value||null,p_name:$('pname').value,p_type:$('ptype').value||null,p_rate:+$('prate').value});
+  ['pid','pname','ptype','prate'].forEach(i=>$(i).value='');$('ptitle').textContent='เพิ่มแปลง';toast('บันทึกแปลงแล้ว');load()};
+function editP(id){const p=P.find(x=>x.id===id);$('pid').value=id;$('pname').value=p.name;$('ptype').value=p.cane_type||'';$('prate').value=p.rate;$('ptitle').textContent='แก้ไขแปลง (เรทใหม่ใช้กับมัดที่จดต่อจากนี้)';scrollTo(0,0)}
+async function voidL(id){const r=prompt('เหตุผลที่ยกเลิก');if(!r)return;await rpc('void_bundle',{p_log:id,p_reason:r});toast('ยกเลิกแล้ว');load()}
+async function linkW(id){const u=prompt('วางรหัส User UID ที่คนงานส่งมา');if(!u)return;await rpc('link_worker',{p_worker:id,p_user:u.trim()});toast('ผูกบัญชีแล้ว');load()}
+async function adjW(id){const a=+prompt('จำนวนที่ปรับ (บวกหรือลบ)');if(!a)return;const n=prompt('เหตุผล');if(!n)return;await rpc('adjust_balance',{p_worker:id,p_amount:a,p_note:n});toast('ปรับยอดแล้ว');load()}
+async function settleW(id){const w=W.find(x=>x.worker_id===id);if(!confirm(`จ่ายปิดงวด ${w.name} ฿${fmt(w.balance)} ?`))return;const v=await rpc('settle_worker',{p_worker:id,p_note:null});toast('จ่าย ฿'+fmt(v)+' แล้ว');load()}
+
+$('date1').value=new Date().toISOString().slice(0,10);
+login().then(async ok=>{if(!ok)return;tab('tally');await load()}).catch(e=>toast(e.message,1));
+</script>
+</body>
+</html>

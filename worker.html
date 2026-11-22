@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>มัดอ้อยของฉัน</title>
+<style>
+:root{--bg:#f3efe1;--ink:#1f2a1c;--cane:#2f5d3a;--soft:#e4ddc4;--debt:#b3402a;--card:#fffdf6;--mut:#6b705f}
+@media(prefers-color-scheme:dark){:root{--bg:#171c15;--ink:#ece8d6;--cane:#7fbf8c;--soft:#2a3226;--debt:#ff8a73;--card:#1f261c;--mut:#a3a891}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Noto Sans Thai","Sarabun",system-ui,sans-serif;padding:16px;max-width:520px;margin:auto}
+h1{font-size:1.1rem;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--soft);border-radius:12px;padding:16px;margin-bottom:12px}
+.big{font-size:2.4rem;font-weight:700;letter-spacing:-.02em;color:var(--cane)}
+.big.neg{color:var(--debt)}
+.row{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--soft)}
+.row:last-child{border:0}
+.mut{color:var(--mut);font-size:.9rem}
+.pos{color:var(--cane)}.neg{color:var(--debt)}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+code{background:var(--soft);padding:2px 6px;border-radius:6px;word-break:break-all}
+button{font:inherit;padding:10px 14px;border-radius:10px;border:0;background:var(--cane);color:#fff}
+</style>
+</head>
+<body>
+<h1 id="hello">กำลังโหลด…</h1>
+<div id="app"></div>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+const CONFIG={LIFF_ID:'',SUPABASE_URL:'',SUPABASE_ANON_KEY:'',AUTH_FUNCTION:''};
+const sb=supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON_KEY);
+const $=id=>document.getElementById(id);
+const fmt=n=>Number(n||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const LABEL={earn:'ค่ามัด',withdraw:'เบิกเงิน',void:'ยกเลิกรายการ',adjust:'ปรับยอด',settle:'จ่ายปิดงวด'};
+
+async function login(){
+  await liff.init({liffId:CONFIG.LIFF_ID});
+  if(!liff.isLoggedIn()){liff.login();return false}
+  const t=liff.getIDToken();
+  const r=await fetch(`${CONFIG.SUPABASE_URL}/functions/v1/${CONFIG.AUTH_FUNCTION}`,{method:'POST',
+    headers:{'Content-Type':'application/json',apikey:CONFIG.SUPABASE_ANON_KEY},body:JSON.stringify({idToken:t,id_token:t})});
+  const d=await r.json();const s=d.session||d;
+  if(!s.access_token)throw new Error(d.error||'เข้าสู่ระบบไม่สำเร็จ');
+  await sb.auth.setSession({access_token:s.access_token,refresh_token:s.refresh_token});
+  return true;
+}
+
+async function main(){
+  const {data:{user}}=await sb.auth.getUser();
+  const {data:me}=await sb.from('worker_balances').select('*').eq('user_id',user.id).maybeSingle();
+  if(!me){
+    $('hello').textContent='ยังไม่ได้ผูกบัญชี';
+    $('app').innerHTML=`<div class="card"><p>แจ้งชื่อกับหัวหน้า แล้วส่งรหัสนี้ให้หัวหน้าผูกบัญชี</p><p><code id="uid">${esc(user.id)}</code></p><button onclick="navigator.clipboard.writeText('${esc(user.id)}')">คัดลอกรหัส</button></div>`;
+    return;
+  }
+  $('hello').textContent=`${me.name} (${me.worker_code})`;
+  const today=new Date().toISOString().slice(0,10);
+  const [{data:logs},{data:led}]=await Promise.all([
+    sb.from('bundle_logs').select('*,plots(name)').eq('worker_id',me.worker_id).order('work_date',{ascending:false}).order('created_at',{ascending:false}).limit(30),
+    sb.from('wallet_ledger').select('*').eq('worker_id',me.worker_id).order('created_at',{ascending:false}).limit(50)]);
+  const tq=(logs||[]).filter(l=>!l.voided&&l.work_date===today).reduce((a,l)=>a+l.qty,0);
+  const neg=me.balance<0;
+  $('app').innerHTML=`
+  <div class="card"><div class="mut">${neg?'ค้างคืน (เบิกเกินค่ามัด)':'ยอดคงเหลือ'}</div>
+    <div class="big ${neg?'neg':''}">฿${fmt(Math.abs(me.balance))}</div>
+    <div class="stats"><div><div class="mut">ค่ามัดสะสม</div>฿${fmt(me.total_earned)}</div>
+    <div><div class="mut">เบิกไปแล้ว</div>฿${fmt(me.total_withdrawn)}</div></div>
+    <div class="mut" style="margin-top:8px">มัดวันนี้ ${tq} มัด</div></div>
+  <div class="card"><b>QR ประจำตัว</b><div class="mut">โชว์ให้หัวหน้าสแกนตอนจดมัดหรือเบิกเงิน</div><div id="qr" style="background:#fff;padding:12px;border-radius:10px;display:inline-block;margin-top:8px"></div><div class="mut">${esc(me.worker_code)}</div></div>
+  <div class="card"><b>มัดที่จด</b>${(logs||[]).map(l=>`<div class="row"><span>${l.work_date} · ${esc(l.plots?.name)}<br><span class="mut">${l.qty} มัด x ${fmt(l.rate)}${l.voided?' · ยกเลิก: '+esc(l.void_reason):''}</span></span><span class="${l.voided?'mut':'pos'}" style="${l.voided?'text-decoration:line-through':''}">฿${fmt(l.amount)}</span></div>`).join('')||'<p class="mut">ยังไม่มีรายการ</p>'}</div>
+  <div class="card"><b>เงินเข้า-ออก</b>${(led||[]).map(e=>`<div class="row"><span>${LABEL[e.entry_type]}<br><span class="mut">${new Date(e.created_at).toLocaleString('th-TH')}${e.note?' · '+esc(e.note):''}</span></span><span class="${e.amount<0?'neg':'pos'}">${e.amount<0?'-':'+'}฿${fmt(Math.abs(e.amount))}</span></div>`).join('')||'<p class="mut">ยังไม่มีรายการ</p>'}</div>`;
+}
+const _main=main;
+main=async function(){await _main();const q=$('qr');if(q&&window.QRCode){const c=document.querySelector('#qr+div').textContent.trim();new QRCode(q,{text:'CW:'+c,width:180,height:180})}};
+login().then(ok=>ok&&main()).catch(e=>{$('hello').textContent='เปิดไม่สำเร็จ';$('app').innerHTML=`<div class="card neg">${esc(e.message)}</div>`});
+</script>
+</body>
+</html>

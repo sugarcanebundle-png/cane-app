@@ -63,7 +63,7 @@ async function main(){
     return;
   }
   $('hello').textContent=`${me.name} (${me.worker_code})`;
-  const today=new Date().toISOString().slice(0,10);
+  const today=new Date(Date.now()+7*3600e3).toISOString().slice(0,10); // วันที่เวลาไทย
   const [{data:logs},{data:led}]=await Promise.all([
     sb.from('bundle_logs').select('*,plots(name)').eq('worker_id',me.worker_id).order('work_date',{ascending:false}).order('created_at',{ascending:false}).limit(30),
     sb.from('wallet_ledger').select('*').eq('worker_id',me.worker_id).order('created_at',{ascending:false}).limit(50)]);

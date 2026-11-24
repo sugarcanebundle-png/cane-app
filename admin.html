@@ -32,7 +32,10 @@ button.gold{background:var(--gold);color:#1c2a1d}
 nav{position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:100%;max-width:640px;display:flex;background:var(--card);box-shadow:0 -6px 20px rgba(28,42,29,.12);border-radius:20px 20px 0 0;padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px));z-index:5}
 nav button{flex:1;background:none;color:var(--mut);display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0;font-size:.72rem;border-radius:14px}
 nav button i{font-style:normal;font-size:1.35rem;line-height:1}
-nav button.on{color:var(--cane);background:color-mix(in srgb,var(--cane) 14%,transparent)}
+nav button.on{color:var(--cane);background:rgba(95,150,110,.16);background:color-mix(in srgb,var(--cane) 14%,transparent)}
+#dlg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:20;align-items:flex-end;justify-content:center}
+#dlg>div{background:var(--card);width:100%;max-width:640px;border-radius:22px 22px 0 0;padding:20px 18px 28px}
+.btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:16px}
 #toast{position:fixed;left:14px;right:14px;bottom:100px;background:var(--ink);color:var(--bg);padding:13px;border-radius:14px;display:none;text-align:center;z-index:9;box-shadow:var(--sh)}
 </style>
 </head>
@@ -90,6 +93,7 @@ nav button.on{color:var(--cane);background:color-mix(in srgb,var(--cane) 14%,tra
  </div>
 </section>
 
+<div id="dlg"></div>
 <div id="toast"></div>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
@@ -98,12 +102,31 @@ const CONFIG={LIFF_ID:'2012750101-5UuLvmYG',SUPABASE_URL:'https://kvptrqeuwpixry
 if(!CONFIG.SUPABASE_URL||!CONFIG.SUPABASE_ANON_KEY||!CONFIG.LIFF_ID){document.body.insertAdjacentHTML('afterbegin','<div class="card" style="color:#b3402a"><b>ยังไม่ได้กรอก CONFIG</b><br>แก้ต้นสคริปต์ของไฟล์นี้: LIFF_ID, SUPABASE_URL, SUPABASE_ANON_KEY, AUTH_FUNCTION</div>');throw new Error('CONFIG empty')}
 const sb=supabase.createClient(CONFIG.SUPABASE_URL,CONFIG.SUPABASE_ANON_KEY);
 const $=id=>document.getElementById(id);
+const todayTH=()=>new Date(Date.now()+7*3600e3).toISOString().slice(0,10);  // วันที่เวลาไทย (UTC+7)
 const fmt=n=>Number(n||0).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const ERR={forbidden:'ไม่มีสิทธิ์แอดมิน',reason_required:'ต้องใส่เหตุผล',amount_must_be_positive:'จำนวนเงินต้องมากกว่า 0',qty_must_be_positive:'จำนวนมัดต้องมากกว่า 0',nothing_to_pay:'ไม่มียอดคงเหลือให้จ่าย',already_voided:'ยกเลิกไปแล้ว'};
 let W=[],P=[],tt;
 function toast(m,bad){const t=$('toast');t.textContent=m;t.style.background=bad?'#b3402a':'';t.style.color=bad?'#fff':'';t.style.display='block';clearTimeout(tt);tt=setTimeout(()=>t.style.display='none',2600)}
-async function rpc(fn,args){const {data,error}=await sb.rpc(fn,args);if(error){const k=Object.keys(ERR).find(k=>error.message.includes(k));toast(k?ERR[k]:error.message,1);throw error}return data}
+let busy=false;
+async function rpc(fn,args){
+  if(busy){toast('กำลังบันทึก รอสักครู่',1);throw new Error('busy')}   // กันกดซ้ำ = กันบันทึกเงินซ้ำ
+  busy=true;
+  try{const {data,error}=await sb.rpc(fn,args);if(error){const k=Object.keys(ERR).find(k=>error.message.includes(k));toast(k?ERR[k]:error.message,1);throw error}return data}
+  finally{busy=false}
+}
+// กล่องถามในหน้า (แทน prompt/confirm ที่บางเครื่อง/เบราว์เซอร์ใน LINE ใช้ไม่ได้)
+function ask({title,msg,fields=[],ok='ยืนยัน',danger}){
+  return new Promise(res=>{
+    const d=$('dlg');
+    d.innerHTML=`<div><b>${esc(title)}</b>${msg?`<p class="mut">${esc(msg)}</p>`:''}${fields.map((f,i)=>`<label>${esc(f.label)}</label><input id="dl${i}" type="${f.type||'text'}" inputmode="${f.mode||'text'}" ${f.step?`step="${f.step}"`:''} placeholder="${esc(f.ph||'')}">`).join('')}<div class="btns"><button class="alt" id="dlc">ยกเลิก</button><button id="dlo"${danger?' style="background:#b3402a"':''}>${esc(ok)}</button></div></div>`;
+    d.style.display='flex';
+    const close=v=>{d.style.display='none';d.innerHTML='';res(v)};
+    $('dlc').onclick=()=>close(null);
+    $('dlo').onclick=()=>close(fields.map((_,i)=>$('dl'+i).value));
+    if(fields.length)$('dl0').focus();
+  });
+}
 
 async function login(){
   await liff.init({liffId:CONFIG.LIFF_ID});
@@ -117,12 +140,12 @@ async function login(){
   return true;
 }
 
-Object.assign(ERR,{reset_disabled:'ปุ่มรีเซ็ตถูกล็อกไว้แล้ว',confirm_required:'ต้องพิมพ์ RESET ให้ถูกต้อง'});
+Object.assign(ERR,{user_not_found:'ไม่พบรหัสผู้ใช้นี้ ตรวจว่าคัดลอกครบ',already_linked:'บัญชีนี้ผูกกับคนงานคนอื่นอยู่แล้ว',worker_not_found:'ไม่พบคนงาน',plot_not_found:'ไม่พบแปลง',reset_disabled:'ปุ่มรีเซ็ตถูกล็อกไว้แล้ว',confirm_required:'ต้องพิมพ์ RESET ให้ถูกต้อง'});
 async function resetData(scope){
   const what=scope==='all'?'ข้อมูลทั้งหมด รวมคนงานและแปลง':'มัดและประวัติเงินทั้งหมด';
-  if(!confirm('จะลบ'+what+'\nลบแล้วกู้คืนไม่ได้ ต้องการทำต่อ?'))return;
-  const t=prompt('พิมพ์ RESET (ตัวพิมพ์ใหญ่) เพื่อยืนยัน');if(t!=='RESET')return toast('ยกเลิกการรีเซ็ต',1);
-  const r=await rpc('reset_data',{p_scope:scope,p_confirm:t});
+  const v=await ask({title:'รีเซ็ตข้อมูล',msg:`จะลบ${what} ลบแล้วกู้คืนไม่ได้ พิมพ์ RESET (ตัวพิมพ์ใหญ่) เพื่อยืนยัน`,fields:[{label:'พิมพ์ RESET'}],ok:'ลบ',danger:1});
+  if(!v)return;if(v[0]!=='RESET')return toast('พิมพ์ไม่ตรง ยกเลิกการรีเซ็ต',1);
+  const r=await rpc('reset_data',{p_scope:scope,p_confirm:'RESET'});
   toast(`ลบแล้ว: ประวัติเงิน ${r.ledger} มัด ${r.logs} คนงาน ${r.workers} แปลง ${r.plots}`);load();
 }
 const TABS=[['tally','จดมัด'],['cash','เบิกเงิน'],['workers','คนงาน'],['plots','แปลง'],['settings','ตั้งค่า']];
@@ -141,7 +164,7 @@ async function load(){
   $('debts').innerHTML=W.filter(x=>x.balance<0).sort((a,b)=>a.balance-b.balance).map(x=>`<div class="row"><span>${esc(x.name)}</span><b class="neg">฿${fmt(-x.balance)}</b></div>`).join('')||'<p class="mut">ไม่มีคนติดลบ</p>';
   $('wlist').innerHTML=W.map(x=>`<div class="row"><span>${esc(x.worker_code)} ${esc(x.name)}<br><span class="mut">${x.user_id?'✓ ผูก LINE แล้ว':'• ยังไม่ผูก LINE'} · ค่ามัด ฿${fmt(x.total_earned)} · เบิก ฿${fmt(x.total_withdrawn)}</span></span>
     <span class="acts"><b class="${x.balance<0?'neg':'pos'}">฿${fmt(x.balance)}</b>
-    ${x.user_id?'':`<button class="sm gold" onclick="linkW('${x.worker_id}')">ผูก</button>`}<button class="sm alt" onclick="adjW('${x.worker_id}')">ปรับ</button><button class="sm" onclick="settleW('${x.worker_id}')">จ่าย</button></span></div>`).join('')||'<p class="mut">ยังไม่มีคนงาน</p>';
+    ${x.user_id?`<button class="sm alt" onclick="unlinkW('${x.worker_id}')">เลิกผูก</button>`:`<button class="sm gold" onclick="linkW('${x.worker_id}')">ผูก</button>`}<button class="sm alt" onclick="adjW('${x.worker_id}')">ปรับ</button><button class="sm" onclick="settleW('${x.worker_id}')">จ่าย</button></span></div>`).join('')||'<p class="mut">ยังไม่มีคนงาน</p>';
   $('plist').innerHTML=P.map(x=>`<div class="row" onclick="editP('${x.id}')"><span>${esc(x.name)}<br><span class="mut">${esc(x.cane_type||'')}</span></span><b>฿${fmt(x.rate)}/มัด</b></div>`).join('')||'<p class="mut">ยังไม่มีแปลง</p>';
   const {data:logs}=await sb.from('bundle_logs').select('*,workers(name),plots(name)').order('created_at',{ascending:false}).limit(20);
   $('recent').innerHTML=(logs||[]).map(l=>`<div class="row"><span>${esc(l.workers?.name)} · ${esc(l.plots?.name)}<br><span class="mut">${l.work_date} · ${l.qty} มัด${l.voided?' · ยกเลิก':''}</span></span>
@@ -172,12 +195,13 @@ $('addw').onclick=async()=>{await rpc('add_worker',{p_name:$('wname').value,p_ph
 $('savep').onclick=async()=>{await rpc('upsert_plot',{p_id:$('pid').value||null,p_name:$('pname').value,p_type:$('ptype').value||null,p_rate:+$('prate').value});
   ['pid','pname','ptype','prate'].forEach(i=>$(i).value='');$('ptitle').textContent='เพิ่มแปลง';toast('บันทึกแปลงแล้ว');load()};
 function editP(id){const p=P.find(x=>x.id===id);$('pid').value=id;$('pname').value=p.name;$('ptype').value=p.cane_type||'';$('prate').value=p.rate;$('ptitle').textContent='แก้ไขแปลง (เรทใหม่ใช้กับมัดที่จดต่อจากนี้)';scrollTo(0,0)}
-async function voidL(id){const r=prompt('เหตุผลที่ยกเลิก');if(!r)return;await rpc('void_bundle',{p_log:id,p_reason:r});toast('ยกเลิกแล้ว');load()}
-async function linkW(id){const u=prompt('วางรหัส User UID ที่คนงานส่งมา');if(!u)return;await rpc('link_worker',{p_worker:id,p_user:u.trim()});toast('ผูกบัญชีแล้ว');load()}
-async function adjW(id){const a=+prompt('จำนวนที่ปรับ (บวกหรือลบ)');if(!a)return;const n=prompt('เหตุผล');if(!n)return;await rpc('adjust_balance',{p_worker:id,p_amount:a,p_note:n});toast('ปรับยอดแล้ว');load()}
-async function settleW(id){const w=W.find(x=>x.worker_id===id);if(!confirm(`จ่ายปิดงวด ${w.name} ฿${fmt(w.balance)} ?`))return;const v=await rpc('settle_worker',{p_worker:id,p_note:null});toast('จ่าย ฿'+fmt(v)+' แล้ว');load()}
+async function voidL(id){const v=await ask({title:'ยกเลิกรายการมัด',fields:[{label:'เหตุผลที่ยกเลิก'}],ok:'ยกเลิกรายการ',danger:1});if(!v)return;if(!v[0].trim())return toast('ต้องใส่เหตุผล',1);await rpc('void_bundle',{p_log:id,p_reason:v[0].trim()});toast('ยกเลิกแล้ว');load()}
+async function linkW(id){const v=await ask({title:'ผูกบัญชี LINE',msg:'วางรหัส User UID ที่คนงานส่งมา',fields:[{label:'User UID',ph:'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'}],ok:'ผูก'});if(!v||!v[0].trim())return;await rpc('link_worker',{p_worker:id,p_user:v[0].trim()});toast('ผูกบัญชีแล้ว');load()}
+async function unlinkW(id){const w=W.find(x=>x.worker_id===id);const v=await ask({title:'เลิกผูก LINE',msg:`เลิกผูกบัญชี LINE ของ ${w.name}? (ข้อมูลเงินไม่หาย ผูกใหม่ได้)`,ok:'เลิกผูก',danger:1});if(!v)return;await rpc('link_worker',{p_worker:id,p_user:null});toast('เลิกผูกแล้ว');load()}
+async function adjW(id){const v=await ask({title:'ปรับยอด',fields:[{label:'จำนวนที่ปรับ (บวกหรือลบ)',type:'number',mode:'decimal',step:'0.01'},{label:'เหตุผล'}],ok:'ปรับยอด'});if(!v)return;const a=+v[0];if(!a||!v[1].trim())return toast('ใส่จำนวนและเหตุผล',1);await rpc('adjust_balance',{p_worker:id,p_amount:a,p_note:v[1].trim()});toast('ปรับยอดแล้ว');load()}
+async function settleW(id){const w=W.find(x=>x.worker_id===id);const v=await ask({title:'จ่ายปิดงวด',msg:`${w.name} ยอดคงเหลือ ฿${fmt(w.balance)}`,ok:'จ่ายแล้ว'});if(!v)return;const r=await rpc('settle_worker',{p_worker:id,p_note:null});toast('จ่าย ฿'+fmt(r)+' แล้ว');load()}
 
-$('date1').value=new Date().toISOString().slice(0,10);
+$('date1').value=todayTH();
 login().then(async ok=>{if(!ok)return;const {data:isAdmin}=await sb.rpc('is_cane_admin');if(!isAdmin){document.body.innerHTML='<div class="card" style="color:#b3402a;margin:16px"><b>ไม่มีสิทธิ์แอดมิน</b><br>บัญชีนี้ไม่ได้รับสิทธิ์เข้าหน้านี้</div>';return}tab('tally');await load()}).catch(e=>toast(e.message,1));
 </script>
 </body>

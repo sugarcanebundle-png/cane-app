@@ -5,21 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>มัดอ้อยของฉัน</title>
 <style>
-:root{--bg:#f3efe1;--ink:#1f2a1c;--cane:#2f5d3a;--soft:#e4ddc4;--debt:#b3402a;--card:#fffdf6;--mut:#6b705f}
-@media(prefers-color-scheme:dark){:root{--bg:#171c15;--ink:#ece8d6;--cane:#7fbf8c;--soft:#2a3226;--debt:#ff8a73;--card:#1f261c;--mut:#a3a891}}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Noto Sans Thai","Sarabun",system-ui,sans-serif;padding:16px;max-width:520px;margin:auto}
-h1{font-size:1.1rem;margin:0 0 12px}
-.card{background:var(--card);border:1px solid var(--soft);border-radius:12px;padding:16px;margin-bottom:12px}
-.big{font-size:2.4rem;font-weight:700;letter-spacing:-.02em;color:var(--cane)}
-.big.neg{color:var(--debt)}
-.row{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--soft)}
-.row:last-child{border:0}
-.mut{color:var(--mut);font-size:.9rem}
-.pos{color:var(--cane)}.neg{color:var(--debt)}
-.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+:root{--bg:#f2eee0;--ink:#1c2a1d;--cane:#2f5d3a;--soft:#e6e0c8;--debt:#b3402a;--card:#fffefa;--mut:#6b705f;--gold:#d9a93a;--sh:0 1px 2px rgba(28,42,29,.06),0 8px 20px rgba(28,42,29,.08)}
+@media(prefers-color-scheme:dark){:root{--bg:#141913;--ink:#ece8d6;--cane:#6fae7e;--soft:#2a3226;--debt:#ff8a73;--card:#1d241a;--mut:#a3a891;--gold:#e0b341;--sh:0 1px 2px rgba(0,0,0,.4)}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+.mut{color:var(--mut);font-size:.85rem}.pos{color:var(--cane)}.neg{color:var(--debt)}
+button{font:inherit;font-weight:600;padding:12px 16px;border-radius:12px;border:0;background:var(--cane);color:#fff;cursor:pointer;transition:transform .08s,opacity .15s}
+button:active{transform:scale(.97);opacity:.9}
+.card{background:var(--card);border-radius:18px;padding:16px;box-shadow:var(--sh)}
+.card>b{display:block;margin-bottom:4px;font-size:1.02rem}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--soft)}
+.row:last-child{border:0}.row>span:first-child{min-width:0}
+body{margin:auto;background:var(--bg);color:var(--ink);font:16px/1.5 "Noto Sans Thai","Sarabun",system-ui,sans-serif;max-width:520px;padding:0 14px 28px}
+h1{font-size:1.05rem;margin:0 -14px 14px;padding:18px 18px 16px;background:linear-gradient(135deg,#2f5d3a,#43805a);color:#fff;border-radius:0 0 22px 22px}
+.card{margin:0 0 12px}
+.big{font-size:2.6rem;font-weight:700;letter-spacing:-.02em;line-height:1.15;font-variant-numeric:tabular-nums}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.stats>div{background:rgba(255,255,255,.14);border-radius:12px;padding:10px 12px}
 code{background:var(--soft);padding:2px 6px;border-radius:6px;word-break:break-all}
-button{font:inherit;padding:10px 14px;border-radius:10px;border:0;background:var(--cane);color:#fff}
+.hero{background:linear-gradient(135deg,#2f5d3a,#43805a);color:#fff;padding:20px}
+.hero.neg{background:linear-gradient(135deg,#9a3b26,#c0583f);color:#fff}
+.hero .big{color:#fff}.hero .mut{color:rgba(255,255,255,.78)}
 </style>
 </head>
 <body>
@@ -65,7 +70,7 @@ async function main(){
   const tq=(logs||[]).filter(l=>!l.voided&&l.work_date===today).reduce((a,l)=>a+l.qty,0);
   const neg=me.balance<0;
   $('app').innerHTML=`
-  <div class="card"><div class="mut">${neg?'ค้างคืน (เบิกเกินค่ามัด)':'ยอดคงเหลือ'}</div>
+  <div class="card hero ${neg?'neg':''}"><div class="mut">${neg?'ค้างคืน (เบิกเกินค่ามัด)':'ยอดคงเหลือ'}</div>
     <div class="big ${neg?'neg':''}">฿${fmt(Math.abs(me.balance))}</div>
     <div class="stats"><div><div class="mut">ค่ามัดสะสม</div>฿${fmt(me.total_earned)}</div>
     <div><div class="mut">เบิกไปแล้ว</div>฿${fmt(me.total_withdrawn)}</div></div>

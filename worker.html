@@ -21,6 +21,9 @@ h1{font-size:1.05rem;margin:0 -14px 14px;padding:18px 18px 16px;background:linea
 .big{font-size:2.6rem;font-weight:700;letter-spacing:-.02em;line-height:1.15;font-variant-numeric:tabular-nums}
 .stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
 .stats>div{background:rgba(255,255,255,.14);border-radius:12px;padding:10px 12px}
+label{display:block;margin:12px 0 4px;font-size:.82rem;font-weight:600;color:var(--mut)}
+input{width:100%;font:inherit;padding:12px 14px;border-radius:12px;border:1.5px solid var(--soft);background:var(--bg);color:var(--ink);outline:none}
+.pdfbtn{display:block;text-align:center;margin-top:12px;padding:14px;border-radius:12px;background:var(--gold);color:#1c2a1d;font-weight:700;text-decoration:none}
 code{background:var(--soft);padding:2px 6px;border-radius:6px;word-break:break-all}
 .hero{background:linear-gradient(135deg,#2f5d3a,#43805a);color:#fff;padding:20px}
 .hero.neg{background:linear-gradient(135deg,#9a3b26,#c0583f);color:#fff}
@@ -32,6 +35,7 @@ code{background:var(--soft);padding:2px 6px;border-radius:6px;word-break:break-a
 <div id="app"></div>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 const CONFIG={LIFF_ID:'2012750101-uZULmKfQ',SUPABASE_URL:'https://kvptrqeuwpixryrbibtu.supabase.co',SUPABASE_ANON_KEY:'sb_publishable_IlCLtd4xQv9WgZgWQm1XEg_jnOuBSLI',AUTH_FUNCTION:'quick-function'};
@@ -54,6 +58,119 @@ async function login(){
   return true;
 }
 
+/* ===== ส่งออกรายงานเป็น PDF ===== */
+const say=(m,b)=>typeof toast==='function'?toast(m,b):alert(m);
+const dTH=s=>{const [y,m,d]=s.split('-');return `${d}/${m}/${+y+543}`};
+const n0=v=>Number(v).toLocaleString('th-TH');
+const fm=v=>Number(v).toLocaleString('th-TH',{minimumFractionDigits:2,maximumFractionDigits:2});
+const thDay=t=>new Date(Date.parse(t)+7*3600e3).toISOString().slice(0,10);
+async function pagedAll(q){let all=[],off=0;for(;;){const {data,error}=await q(off,off+999);if(error)throw error;all=all.concat(data);if(data.length<1000)break;off+=1000}return all}
+async function fetchRows(wid,from,to){
+  const all=await pagedAll((a,b)=>sb.from('bundle_logs').select('work_date,qty,rate,amount,plots(name)').eq('worker_id',wid).eq('voided',false).gte('work_date',from).lte('work_date',to).order('work_date').order('created_at').range(a,b));
+  const m=new Map();   // รวมรายการวันเดียวกัน แปลงเดียวกัน เรทเดียวกัน
+  for(const r of all){const p=r.plots?.name||'-',k=r.work_date+'|'+p+'|'+r.rate;
+    const e=m.get(k)||{date:r.work_date,plot:p,rate:Number(r.rate),qty:0,amount:0};e.qty+=r.qty;e.amount+=Number(r.amount);m.set(k,e)}
+  return [...m.values()];
+}
+async function fetchWithdrawals(wid,from,to){
+  const all=await pagedAll((a,b)=>sb.from('wallet_ledger').select('created_at,amount,note').eq('worker_id',wid).eq('entry_type','withdraw').gte('created_at',from+'T00:00:00+07:00').lte('created_at',to+'T23:59:59.999+07:00').order('created_at').range(a,b));
+  return all.map(r=>({date:thDay(r.created_at),note:r.note||'-',amount:-Number(r.amount)}));
+}
+async function fetchBalance(wid){const {data,error}=await sb.from('worker_balances').select('balance').eq('worker_id',wid).maybeSingle();if(error)throw error;return Number(data?.balance||0)}
+async function makePdf(o){
+  const PW=1240,PH=1754,M=60,RH=56,LIM=PH-110,F='"Noto Sans Thai","Sarabun","Tahoma",sans-serif';   // A4 ที่ 150 dpi
+  const EC=[{k:'date',t:'วันที่',w:190,a:'left'},{k:'plot',t:'แปลง',w:360,a:'left'},{k:'qty',t:'จำนวนมัด',w:180,a:'right'},{k:'rate',t:'ราคา/มัด',w:180,a:'right'},{k:'amount',t:'รายได้ (บาท)',w:210,a:'right'}];
+  const WC=[{k:'date',t:'วันที่',w:190,a:'left'},{k:'note',t:'หมายเหตุ',w:540,a:'left'},{k:'amount',t:'จำนวนเงิน (บาท)',w:390,a:'right'}];
+  const COLS={E:EC,W:WC};
+  const tq=o.rows.reduce((a,r)=>a+r.qty,0),ta=o.rows.reduce((a,r)=>a+r.amount,0),tw=o.wd.reduce((a,r)=>a+r.amount,0),net=ta-tw;
+  const L=[];
+  L.push({kind:'title',h:70,keep:2,text:'รายการมัดที่ตัด'});
+  if(o.rows.length){
+    L.push({kind:'th',tbl:'E',h:RH});
+    o.rows.forEach((r,i)=>L.push({kind:'row',tbl:'E',h:RH,alt:i%2,v:{date:dTH(r.date),plot:r.plot,qty:n0(r.qty),rate:fm(r.rate),amount:fm(r.amount)}}));
+    L.push({kind:'sum',tbl:'E',h:RH,v:{date:'รวมทั้งหมด',plot:'',qty:n0(tq),rate:'',amount:fm(ta)}});     // แถวสรุปยอด
+  }else L.push({kind:'note',h:RH,text:'ไม่มีรายการมัดในช่วงนี้'});
+  L.push({kind:'gap',h:36});
+  L.push({kind:'title',h:70,keep:2,text:'รายการเบิกเงิน'});
+  if(o.wd.length){
+    L.push({kind:'th',tbl:'W',h:RH});
+    o.wd.forEach((r,i)=>L.push({kind:'row',tbl:'W',h:RH,alt:i%2,v:{date:dTH(r.date),note:r.note,amount:fm(r.amount)}}));
+    L.push({kind:'sum',tbl:'W',h:RH,v:{date:'รวมเบิก',note:'',amount:fm(tw)}});
+  }else L.push({kind:'note',h:RH,text:'ไม่มีการเบิกเงินในช่วงนี้'});
+  L.push({kind:'gap',h:36});
+  L.push({kind:'title',h:70,keep:5,text:'สรุปยอด'});
+  L.push({kind:'kv',h:RH,label:'รายได้รวม (ช่วงนี้)',value:fm(ta)});
+  L.push({kind:'kv',h:RH,label:'เบิกเงิน (ช่วงนี้)',value:tw?'-'+fm(tw):fm(0)});
+  L.push({kind:'kv',h:RH,label:'คงเหลือช่วงนี้ (รายได้ - เบิก)',value:fm(net),bold:1,neg:net<0});
+  L.push({kind:'kv',h:RH,label:o.balance<0?'ยอดค้างคืนสะสม ณ วันที่ออกรายงาน':'ยอดคงเหลือสะสม ณ วันที่ออกรายงาน',value:fm(o.balance),bold:1,neg:o.balance<0,hi:1});
+  L.push({kind:'note',h:RH,small:1,text:'ยอดสะสมรวมทุกช่วงเวลา รวมการปรับยอดและจ่ายปิดงวด ถ้าติดลบ = เบิกเกินค่ามัดที่ตัดได้'});
+  // แบ่งหน้า
+  const pages=[[]];let y=320;
+  const push=it=>{pages[pages.length-1].push({...it,y});y+=it.h};
+  for(const it of L){
+    if(it.kind==='gap'){y+=it.h;continue}
+    if(y+it.h+(it.keep||0)*RH>LIM){pages.push([]);y=110;
+      if(it.tbl&&it.kind!=='th')push({kind:'th',tbl:it.tbl,h:RH})}          // หน้าใหม่ วาดหัวตารางซ้ำ
+    push(it);
+  }
+  const fit=(g,t,w)=>{t=String(t);if(g.measureText(t).width<=w)return t;while(t.length>1&&g.measureText(t+'…').width>w)t=t.slice(0,-1);return t+'…'};
+  const cells=(g,cols,v,y,sum)=>{let x=M;cols.forEach(cl=>{g.textAlign=cl.a;
+    const wmax=(sum&&cl.k==='date')?cols[0].w+cols[1].w-32:cl.w-32;
+    g.fillText(fit(g,v[cl.k],wmax),cl.a==='left'?x+16:x+cl.w-16,y+RH/2);x+=cl.w})};
+  const cvs=pages.map((cmds,pi)=>{
+    const c=document.createElement('canvas');c.width=PW;c.height=PH;const g=c.getContext('2d');
+    g.fillStyle='#fff';g.fillRect(0,0,PW,PH);g.textBaseline='middle';
+    if(pi===0){
+      g.fillStyle='#2f5d3a';g.fillRect(0,0,PW,16);
+      g.textAlign='left';g.fillStyle='#1c2a1d';g.font=`700 52px ${F}`;g.fillText('รายงานการตัดอ้อย',M,100);
+      g.font=`400 30px ${F}`;g.fillStyle='#444';
+      g.fillText(`ชื่อ: ${o.name} (${o.code})`,M,170);
+      g.fillText(`ช่วงวันที่: ${dTH(o.from)} ถึง ${dTH(o.to)}`,M,215);
+      g.fillText(`ออกรายงานเมื่อ: ${dTH(new Date(Date.now()+7*3600e3).toISOString().slice(0,10))}`,M,260);
+    }
+    cmds.forEach(it=>{const y=it.y;
+      if(it.kind==='title'){g.textAlign='left';g.fillStyle='#2f5d3a';g.font=`700 32px ${F}`;g.fillText(it.text,M,y+30);g.fillRect(M,y+56,PW-2*M,3);return}
+      if(it.kind==='note'){g.textAlign='left';g.fillStyle='#777';g.font=`400 ${it.small?22:26}px ${F}`;g.fillText(it.text,M+16,y+RH/2);return}
+      if(it.kind==='th'){g.fillStyle='#2f5d3a';g.fillRect(M,y,PW-2*M,RH);g.fillStyle='#fff';g.font=`700 26px ${F}`;
+        let x=M;COLS[it.tbl].forEach(cl=>{g.textAlign=cl.a;g.fillText(cl.t,cl.a==='left'?x+16:x+cl.w-16,y+RH/2);x+=cl.w});return}
+      if(it.kind==='kv'){g.fillStyle=it.hi?'#f3e3b0':'#f6f3e6';g.fillRect(M,y,PW-2*M,RH);
+        g.fillStyle='#1c2a1d';g.font=`${it.bold?700:400} 28px ${F}`;g.textAlign='left';g.fillText(it.label,M+16,y+RH/2);
+        g.fillStyle=it.neg?'#b3402a':'#1c2a1d';g.textAlign='right';g.fillText(it.value,PW-M-16,y+RH/2);return}
+      // row / sum
+      if(it.kind==='sum'){g.fillStyle='#f3e3b0';g.fillRect(M,y,PW-2*M,RH);g.fillStyle='#2f5d3a';g.fillRect(M,y,PW-2*M,4)}
+      else if(it.alt){g.fillStyle='#f6f3e6';g.fillRect(M,y,PW-2*M,RH)}
+      g.fillStyle='#1c2a1d';g.font=`${it.kind==='sum'?700:400} 26px ${F}`;
+      cells(g,COLS[it.tbl],it.v,y,it.kind==='sum');
+      g.strokeStyle='#e2dfcf';g.lineWidth=1;g.beginPath();g.moveTo(M,y+RH);g.lineTo(PW-M,y+RH);g.stroke();
+    });
+    g.font=`400 22px ${F}`;g.fillStyle='#888';
+    g.textAlign='left';g.fillText('ระบบจดมัดอ้อย',M,PH-60);
+    g.textAlign='right';g.fillText(`หน้า ${pi+1}/${pages.length}`,PW-M,PH-60);
+    return c;
+  });
+  const {jsPDF}=window.jspdf;const doc=new jsPDF({unit:'pt',format:'a4',compress:true});
+  cvs.forEach((c,i)=>{if(i)doc.addPage();doc.addImage(c.toDataURL('image/jpeg',0.92),'JPEG',0,0,595.28,841.89)});
+  return doc.output('blob');
+}
+function openPdf(u){if(window.liff&&liff.isInClient()){liff.openWindow({url:u,external:true});return false}return true}
+async function exportPdf({wid,name,code,from,to}){
+  if(!wid)return say('เลือกคนงาน',1);
+  if(!from||!to||from>to)return say('ช่วงวันที่ไม่ถูกต้อง',1);
+  const btn=$('exp'),out=$('pdfOut'),old=btn.textContent;btn.disabled=true;btn.textContent='กำลังสร้าง PDF…';out.innerHTML='';
+  try{
+    const [rows,wd,balance]=await Promise.all([fetchRows(wid,from,to),fetchWithdrawals(wid,from,to),fetchBalance(wid)]);
+    if(!rows.length&&!wd.length)return say('ไม่มีข้อมูลในช่วงวันที่นี้',1);
+    const blob=await makePdf({name,code,from,to,rows,wd,balance});
+    const {data:{user}}=await sb.auth.getUser();
+    const path=`${user.id}/report-${code}.pdf`;
+    const up=await sb.storage.from('reports').upload(path,blob,{contentType:'application/pdf',upsert:true});
+    if(up.error)throw up.error;
+    const sg=await sb.storage.from('reports').createSignedUrl(path,900,{download:`report-${code}-${from}_${to}.pdf`});
+    if(sg.error)throw sg.error;
+    out.innerHTML=`<a class="pdfbtn" href="${sg.data.signedUrl}" target="_blank" onclick="return openPdf(this.href)">📄 เปิดไฟล์ PDF (มัด ${rows.length} รายการ, เบิก ${wd.length} รายการ)</a><div class="mut" style="margin-top:6px">ลิงก์ใช้ได้ 15 นาที แตะแล้วจะเปิดในเบราว์เซอร์เพื่อดาวน์โหลดหรือแชร์</div>`;
+  }catch(e){say('สร้าง PDF ไม่สำเร็จ: '+(e.message||e),1)}
+  finally{btn.disabled=false;btn.textContent=old}
+}
 async function main(){
   const {data:{user}}=await sb.auth.getUser();
   const {data:me}=await sb.from('worker_balances').select('*').eq('user_id',user.id).maybeSingle();
@@ -62,7 +179,7 @@ async function main(){
     $('app').innerHTML=`<div class="card"><p>แจ้งชื่อกับหัวหน้า แล้วส่งรหัสนี้ให้หัวหน้าผูกบัญชี</p><p><code id="uid">${esc(user.id)}</code></p><button onclick="navigator.clipboard.writeText('${esc(user.id)}')">คัดลอกรหัส</button></div>`;
     return;
   }
-  $('hello').textContent=`${me.name} (${me.worker_code})`;
+  $('hello').textContent=`${me.name} (${me.worker_code})`;window.ME=me;
   const today=new Date(Date.now()+7*3600e3).toISOString().slice(0,10); // วันที่เวลาไทย
   const [{data:logs},{data:led}]=await Promise.all([
     sb.from('bundle_logs').select('*,plots(name)').eq('worker_id',me.worker_id).order('work_date',{ascending:false}).order('created_at',{ascending:false}).limit(30),
@@ -76,11 +193,14 @@ async function main(){
     <div><div class="mut">เบิกไปแล้ว</div>฿${fmt(me.total_withdrawn)}</div></div>
     <div class="mut" style="margin-top:8px">มัดวันนี้ ${tq} มัด</div></div>
   <div class="card"><b>QR ประจำตัว</b><div class="mut">โชว์ให้หัวหน้าสแกนตอนจดมัดหรือเบิกเงิน</div><div id="qr" style="background:#fff;padding:12px;border-radius:10px;display:inline-block;margin-top:8px"></div><div class="mut">${esc(me.worker_code)}</div></div>
+  <div class="card"><b>ส่งออกรายงานเป็น PDF</b><div class="mut">ตารางมัดที่ตัด รายการเบิกเงิน และยอดคงเหลือ</div>
+    <label>ตั้งแต่วันที่</label><input type="date" id="d1"><label>ถึงวันที่</label><input type="date" id="d2">
+    <button id="exp" style="width:100%;margin-top:14px">สร้าง PDF</button><div id="pdfOut"></div></div>
   <div class="card"><b>มัดที่จด</b>${(logs||[]).map(l=>`<div class="row"><span>${l.work_date} · ${esc(l.plots?.name)}<br><span class="mut">${l.qty} มัด x ${fmt(l.rate)}${l.voided?' · ยกเลิก: '+esc(l.void_reason):''}</span></span><span class="${l.voided?'mut':'pos'}" style="${l.voided?'text-decoration:line-through':''}">฿${fmt(l.amount)}</span></div>`).join('')||'<p class="mut">ยังไม่มีรายการ</p>'}</div>
   <div class="card"><b>เงินเข้า-ออก</b>${(led||[]).map(e=>`<div class="row"><span>${LABEL[e.entry_type]}<br><span class="mut">${new Date(e.created_at).toLocaleString('th-TH')}${e.note?' · '+esc(e.note):''}</span></span><span class="${e.amount<0?'neg':'pos'}">${e.amount<0?'-':'+'}฿${fmt(Math.abs(e.amount))}</span></div>`).join('')||'<p class="mut">ยังไม่มีรายการ</p>'}</div>`;
 }
 const _main=main;
-main=async function(){await _main();const q=$('qr');if(q&&window.QRCode){const c=document.querySelector('#qr+div').textContent.trim();new QRCode(q,{text:'CW:'+c,width:180,height:180})}};
+main=async function(){await _main();if($('exp')){const t=new Date(Date.now()+7*3600e3).toISOString().slice(0,10);$('d1').value=t.slice(0,8)+'01';$('d2').value=t;$('exp').onclick=()=>exportPdf({wid:window.ME.worker_id,name:window.ME.name,code:window.ME.worker_code,from:$('d1').value,to:$('d2').value})}const q=$('qr');if(q&&window.QRCode){const c=document.querySelector('#qr+div').textContent.trim();new QRCode(q,{text:'CW:'+c,width:180,height:180})}};
 login().then(ok=>ok&&main()).catch(e=>{$('hello').textContent='เปิดไม่สำเร็จ';$('app').innerHTML=`<div class="card neg">${esc(e.message)}</div>`});
 </script>
 </body>
